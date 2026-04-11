@@ -19,6 +19,7 @@ app.use(cors({
   origin: [
     env.FRONTEND_URL,
     'https://capacite.globalleadership.com.br',
+    'https://strap-capacite-frontend.gkgtsp.easypanel.host',
     'http://localhost:5173',
     'http://localhost:5174',
   ],
