@@ -1,0 +1,315 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════
+// Enums (PostgreSQL native)
+// ═══════════════════════════════════════════
+
+enum OrganizationType {
+  EMPRESA
+  ESCOLA
+  IGREJA
+}
+
+enum TrilhaType {
+  IMPACTO
+  APROFUNDAMENTO
+  CUSTOM
+}
+
+enum GoldStarType {
+  DIAGNOSTICO_COMPLETO
+  PRIMEIRA_PALESTRA
+  TRILHA_COMPLETA
+  DIAGNOSTICO_6MESES
+  TRES_TRILHAS
+}
+
+enum TranscriptionStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// ═══════════════════════════════════════════
+// Core Models
+// ═══════════════════════════════════════════
+
+model User {
+  id               String           @id @default(uuid())
+  name             String
+  email            String           @unique
+  passwordHash     String
+  phone            String?
+  organization     String
+  organizationType OrganizationType @default(EMPRESA)
+  role             String?
+  location         String?
+  avatarUrl        String?
+  isAdmin          Boolean          @default(false)
+  streakDays       Int              @default(0)
+  lastActiveDate   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  diagnosticos       Diagnostico[]
+  trilhas            Trilha[]
+  trilhaProgress     TrilhaProgress[]
+  goldStars          GoldStar[]
+  complementaryFiles ComplementaryFile[]
+  aiInteractions     AIInteraction[]
+
+  @@map("users")
+}
+
+model Diagnostico {
+  id                String  @id @default(uuid())
+  userId            String
+  answers           Json    // { "q1": 3, "q2": 2, ... }
+  categoryScores    Json    // { "cat1": 9, "cat2": 6, ... }
+  categoryGaps      Json    // { "cat1": 3, "cat2": 6, ... }
+  priority1Category Int
+  priority2Category Int?
+  devolutiva        String? @db.Text
+  suggestedTrilhas  Json?   // AI-generated trilha suggestions
+
+  createdAt DateTime @default(now())
+
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trilhas            Trilha[]
+  complementaryFiles ComplementaryFile[]
+
+  @@index([userId])
+  @@map("diagnosticos")
+}
+
+model Trilha {
+  id            String    @id @default(uuid())
+  userId        String
+  diagnosticoId String?
+  name          String
+  description   String?   @db.Text
+  type          TrilhaType
+  palestraIds   Json      // string array of palestra IDs
+
+  createdAt DateTime @default(now())
+
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  diagnostico Diagnostico?     @relation(fields: [diagnosticoId], references: [id], onDelete: SetNull)
+  progress    TrilhaProgress[]
+
+  @@index([userId])
+  @@index([diagnosticoId])
+  @@map("trilhas")
+}
+
+model TrilhaProgress {
+  id         String    @id @default(uuid())
+  trilhaId   String
+  userId     String
+  palestraId String
+  watched    Boolean   @default(false)
+  watchedAt  DateTime?
+
+  trilha Trilha @relation(fields: [trilhaId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([trilhaId, palestraId])
+  @@index([userId])
+  @@map("trilha_progress")
+}
+
+model GoldStar {
+  id       String       @id @default(uuid())
+  userId   String
+  type     GoldStarType
+  earnedAt DateTime     @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type])
+  @@index([userId])
+  @@map("gold_stars")
+}
+
+model ComplementaryFile {
+  id            String @id @default(uuid())
+  userId        String
+  diagnosticoId String
+  filename      String
+  originalName  String
+  mimeType      String
+  size          Int
+
+  uploadedAt DateTime @default(now())
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  diagnostico Diagnostico @relation(fields: [diagnosticoId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([diagnosticoId])
+  @@map("complementary_files")
+}
+
+// ═══════════════════════════════════════════
+// Palestras & Transcription System
+// ═══════════════════════════════════════════
+
+model Palestra {
+  id          String @id @default(uuid())
+  externalId  String @unique          // "p1", "p2" etc (match frontend catalog)
+  title       String
+  speaker     String
+  description String @db.Text
+  duration    String
+  categoryIds Json                    // ["lideranca-pessoal"]
+  year        Int
+  glsnowUrl   String?
+
+  // Transcription data
+  transcription       String?              @db.Text   // Full transcription text
+  transcriptionStatus TranscriptionStatus  @default(PENDING)
+  summary             String?              @db.Text   // AI-generated summary (~200 words)
+  keyTopics           Json?                // ["confiança", "vulnerabilidade", ...]
+  keyQuotes           Json?                // ["frase impactante 1", ...]
+  isProcessed         Boolean              @default(false)  // true after AI extraction
+  processedAt         DateTime?            // When AI processing completed
+  wordCount           Int?                 // Total word count of transcription
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  chunks              PalestraChunk[]
+  insights            PalestraInsight[]
+  speakerProfile      SpeakerProfile?      @relation(fields: [speakerProfileId], references: [id])
+  speakerProfileId    String?
+
+  @@index([isProcessed])
+  @@index([speakerProfileId])
+  @@map("palestras")
+}
+
+model PalestraChunk {
+  id         String @id @default(uuid())
+  palestraId String
+  content    String @db.Text           // ~500 chars per chunk
+  chunkIndex Int
+  embedding  Json?                     // Vector embedding for semantic search (future)
+
+  palestra Palestra @relation(fields: [palestraId], references: [id], onDelete: Cascade)
+
+  @@unique([palestraId, chunkIndex])
+  @@index([palestraId])
+  @@map("palestra_chunks")
+}
+
+/// AI-extracted insights from palestra transcriptions
+/// Used by the decision engine for trilha generation and search
+model PalestraInsight {
+  id         String @id @default(uuid())
+  palestraId String
+  type       String                    // "conceito", "ferramenta", "principio", "historia", "exercicio"
+  title      String
+  content    String @db.Text           // Detailed description of the insight
+  relevance  Float  @default(0.0)      // 0.0 to 1.0 relevance score
+  tags       Json?                     // Additional categorization tags
+
+  createdAt DateTime @default(now())
+
+  palestra Palestra @relation(fields: [palestraId], references: [id], onDelete: Cascade)
+
+  @@index([palestraId])
+  @@index([type])
+  @@map("palestra_insights")
+}
+
+// ═══════════════════════════════════════════
+// Speaker Profiles
+// ═══════════════════════════════════════════
+
+model SpeakerProfile {
+  id        String  @id @default(uuid())
+  name      String  @unique
+  bio       String? @db.Text
+  photoUrl  String?
+  expertise Json?                     // ["liderança", "comunicação", ...]
+  country   String?
+  website   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  palestras Palestra[]
+
+  @@map("speaker_profiles")
+}
+
+// ═══════════════════════════════════════════
+// AI Interaction Log
+// ═══════════════════════════════════════════
+
+model AIInteraction {
+  id           String @id @default(uuid())
+  userId       String
+  intent       String                  // "diagnostic_analysis", "search", "questions", "new_trilha", "evolution_insight"
+  query        String @db.Text
+  response     String @db.Text
+  confidence   Float  @default(0.0)
+  executionMs  Int    @default(0)
+  palestraRefs Json?                   // Palestra IDs referenced in the response
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([intent])
+  @@index([createdAt])
+  @@map("ai_interactions")
+}
+
+// ═══════════════════════════════════════════
+// Categories (persisted for flexibility)
+// ═══════════════════════════════════════════
+
+model Category {
+  id          String @id @default(uuid())
+  slug        String @unique           // "lideranca-pessoal"
+  name        String                   // "Liderança Pessoal"
+  shortName   String                   // "Liderança"
+  description String @db.Text
+  icon        String                   // "Crown"
+  color       String                   // "#FF1493"
+  sortOrder   Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("categories")
+}
+
+// ═══════════════════════════════════════════
+// Diagnostic Questions (persisted)
+// ═══════════════════════════════════════════
+
+model DiagnosticQuestion {
+  id         String @id @default(uuid())
+  questionId String @unique            // "q1", "q2", etc
+  categoryId String                    // references Category.slug
+  text       String @db.Text
+  sortOrder  Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([categoryId])
+  @@map("diagnostic_questions")
+}

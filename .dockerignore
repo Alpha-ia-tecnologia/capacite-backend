@@ -1,0 +1,9 @@
+node_modules
+dist
+.env
+*.ts
+!src/**/*.ts
+uploads/*
+test*.ts
+seed-*.ts
+*.txt
