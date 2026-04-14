@@ -198,6 +198,7 @@ REGRAS ABSOLUTAS:
 2. Use SOMENTE IDs retornados pela ferramenta. NUNCA invente IDs.
 3. ANTES de responder, use "validar_ids" para confirmar que todos os IDs escolhidos são válidos.
 4. Cada trilha deve ter 3-4 palestras.
+5. As palestras selecionadas para a Trilha 1 DEVEM ser COMPLETAMENTE DIFERENTES das da Trilha 2. Nenhuma palestra pode se repetir entre as duas trilhas. Se precisar de mais opções, busque em outras categorias ou limite as trilhas a 2-3 palestras distintas.
 
 Seu retorno final DEVE ser APENAS JSON válido (SÓ O JSON, sem markdown):
 {
