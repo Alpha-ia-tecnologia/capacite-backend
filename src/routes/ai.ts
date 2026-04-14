@@ -2,7 +2,8 @@ import { Router, Response } from 'express';
 import { z } from 'zod';
 import { validate } from '../middleware/validate';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { aiSearch, generatePalestraQuestions, PALESTRANTES_VALIDOS, CATALOGO_OFICIAL } from '../services/deepseek.service';
+import { generatePalestraQuestions, PALESTRANTES_VALIDOS, CATALOGO_OFICIAL } from '../services/deepseek.service';
+import { agentSearch } from '../services/langgraph.service';
 import { decide, Intent } from '../services/decision-engine';
 import prisma from '../lib/prisma';
 
@@ -61,7 +62,7 @@ router.post('/search', validate(searchSchema), async (req: AuthRequest, res: Res
       select: { organizationType: true },
     });
 
-    const result = await aiSearch(req.body.query, user?.organizationType || 'EMPRESA');
+    const result = await agentSearch(req.body.query, user?.organizationType || 'EMPRESA');
 
     // Try to parse as JSON, return raw if fails
     try {
