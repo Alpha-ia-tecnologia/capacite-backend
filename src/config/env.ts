@@ -13,4 +13,7 @@ export const env = {
   FRONTEND_URL: process.env.FRONTEND_URL || 'http://localhost:5173',
   MAX_FILE_SIZE_MB: parseInt(process.env.MAX_FILE_SIZE_MB || '10', 10),
   UPLOAD_DIR: process.env.UPLOAD_DIR || './uploads',
+  // Used by tools/code-review (internal dev tool, not the product runtime).
+  GITHUB_TOKEN: process.env.GITHUB_TOKEN || '',
+  GITHUB_REPO: process.env.GITHUB_REPO || 'Alpha-ia-tecnologia/capacite-backend',
 };

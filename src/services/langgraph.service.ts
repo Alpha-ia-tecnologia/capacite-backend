@@ -4,8 +4,9 @@ import { createReactAgent } from "@langchain/langgraph/prebuilt";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { env } from "../config/env";
-import { getOrgContext, CATALOGO_OFICIAL, PALESTRANTES_VALIDOS, PALESTRA_IDS_VALIDOS } from "./deepseek.service";
+import { getOrgContext } from "./deepseek.service";
 import { CATEGORIES, CategoryScore, getStrengthLevel } from "../lib/scoring";
+import prisma from "../lib/prisma";
 
 // ═══════════════════════════════════════════
 // LLM Instance Factory (DeepSeek via OpenAI SDK)
@@ -22,31 +23,170 @@ function createLLM(temperature = 0.1) {
 }
 
 // ═══════════════════════════════════════════
+// Helpers de busca (tokenizacao + normalizacao)
+// ═══════════════════════════════════════════
+
+// Minusculas + remove acentos: faz "lideranca" casar com "Liderança".
+function normalizar(texto: string): string {
+  return texto.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+}
+
+// Extrai o objeto JSON de uma resposta do LLM que pode vir com prosa ou
+// markdown ao redor (ex.: "Aqui esta o JSON: { ... }").
+function extrairJson(texto: string): string {
+  const semFences = texto.replace(/```json/gi, "").replace(/```/g, "").trim();
+  const inicio = semFences.indexOf("{");
+  const fim = semFences.lastIndexOf("}");
+  if (inicio !== -1 && fim !== -1 && fim > inicio) {
+    return semFences.slice(inicio, fim + 1);
+  }
+  return semFences;
+}
+
+const STOPWORDS = new Set([
+  "de", "da", "do", "das", "dos", "para", "por", "com", "sem", "e", "ou",
+  "o", "a", "os", "as", "um", "uma", "uns", "umas", "em", "no", "na", "nos",
+  "nas", "que", "se", "sobre", "como", "ao", "aos", "meu", "minha", "seu",
+  "sua", "palestra", "palestras", "preletor", "preletores", "tema", "temas",
+]);
+
+// Mapa categoryId numerico (1-7) -> slug armazenado em Palestra.categoryIds.
+const CATEGORY_SLUGS: Record<number, string> = {
+  1: "lideranca-pessoal",
+  2: "pessoas-cultura-confianca",
+  3: "comunicacao-influencia",
+  4: "estrategia-decisoes-execucao",
+  5: "mudanca-inovacao-reinvencao",
+  6: "resiliencia-saude-bemestar",
+  7: "proposito-visao-legado",
+};
+
+// Dicionario de conceitos/sinonimos (normalizados, sem acento) -> slug da categoria.
+// Camada semantica leve: como as descricoes ainda sao placeholders e nao ha
+// embeddings, usamos a taxonomia das 7 categorias para casar a INTENCAO da busca
+// (ex.: "transformacional" -> mudanca-inovacao-reinvencao) e nao so a palavra literal.
+const CONCEPT_KEYWORDS: Record<string, string[]> = {
+  "lideranca-pessoal": [
+    "lideranca", "lider", "autolideranca", "autoconhecimento", "autoconsciencia",
+    "autogestao", "disciplina", "integridade", "coerencia", "carater", "exemplo",
+    "habitos", "mentalidade", "consistencia", "maturidade", "humildade", "confianca",
+  ],
+  "pessoas-cultura-confianca": [
+    "pessoas", "cultura", "confianca", "equipe", "time", "relacionamento",
+    "relacionamentos", "vulnerabilidade", "seguranca", "psicologica", "respeito",
+    "colaboracao", "engajamento", "pertencimento", "diversidade", "inclusao",
+    "empatia", "geracoes", "conexao", "humano", "humana",
+  ],
+  "comunicacao-influencia": [
+    "comunicacao", "comunicar", "influencia", "influenciar", "conversa", "conversas",
+    "feedback", "persuasao", "oratoria", "escuta", "negociacao", "dialogo", "clareza",
+    "mensagem", "storytelling", "apresentacao", "fala", "discurso", "narrativa",
+  ],
+  "estrategia-decisoes-execucao": [
+    "estrategia", "estrategico", "estrategica", "decisao", "decisoes", "decidir",
+    "execucao", "executar", "planejamento", "foco", "prioridade", "prioridades",
+    "meta", "metas", "resultado", "resultados", "produtividade", "gestao",
+    "performance", "desempenho", "processo", "eficiencia", "papeis", "organizacao",
+  ],
+  "mudanca-inovacao-reinvencao": [
+    "mudanca", "transformacao", "transformacional", "transformadora", "transformar",
+    "inovacao", "inovar", "inovadora", "reinvencao", "reinventar", "disrupcao",
+    "criatividade", "criativa", "adaptacao", "agilidade", "futuro", "tecnologia",
+    "transicao", "startup", "mentalidade",
+  ],
+  "resiliencia-saude-bemestar": [
+    "resiliencia", "resiliente", "saude", "emocional", "bemestar", "estresse",
+    "burnout", "equilibrio", "sustentavel", "esgotamento", "autocuidado", "mental",
+    "perseveranca", "superacao", "ansiedade", "paz", "descanso", "ritmo", "limites",
+  ],
+  "proposito-visao-legado": [
+    "proposito", "visao", "legado", "impacto", "missao", "valores", "significado",
+    "sentido", "transcendencia", "contribuicao", "sonho", "causa", "vocacao",
+    "social", "responsabilidade", "esperanca",
+  ],
+};
+
+// Dado um conjunto de tokens da busca, retorna os slugs de categoria cuja
+// intencao foi acionada por algum conceito/sinonimo.
+function categoriasPorConceito(tokens: string[]): Set<string> {
+  const slugs = new Set<string>();
+  for (const [slug, palavras] of Object.entries(CONCEPT_KEYWORDS)) {
+    if (tokens.some(tk => palavras.includes(tk))) slugs.add(slug);
+  }
+  return slugs;
+}
+
+// ═══════════════════════════════════════════
 // TOOL 1: Buscar Palestras no Catálogo
 // ═══════════════════════════════════════════
 
 const buscar_palestras = tool(
   async ({ termo }) => {
-    const lowerTermo = termo.toLowerCase();
+    // Quebra a busca em palavras isoladas e remove acentos/stopwords, para que
+    // frases como "Lideranca transformacional" casem por palavra (e nao exijam
+    // a frase inteira contigua) e sejam insensiveis a acento.
+    const termoNorm = normalizar(termo);
+    const tokens = Array.from(new Set(
+      termoNorm.split(/[^a-z0-9]+/).filter(t => t.length >= 3 && !STOPWORDS.has(t))
+    ));
+    const termosBusca = tokens.length > 0 ? tokens : [termoNorm].filter(Boolean);
 
-    const resultados = CATALOGO_OFICIAL.filter(p =>
-      p.title.toLowerCase().includes(lowerTermo) ||
-      p.speaker.toLowerCase().includes(lowerTermo)
-    );
+    // Categorias acionadas pela INTENCAO da busca (sinonimos/conceitos).
+    const categoriasAlvo = categoriasPorConceito(termosBusca);
+
+    // Dataset pequeno (~uma centena): carrega projecao leve e ranqueia em memoria.
+    const todas = await prisma.palestra.findMany({
+      select: {
+        id: true, externalId: true, title: true, speaker: true,
+        description: true, summary: true, duration: true, year: true,
+        categoryIds: true, isProcessed: true,
+        speakerProfile: { select: { bio: true } },
+      },
+    });
+
+    const resultados = todas
+      .map(p => {
+        const titulo = normalizar(p.title);
+        const palestrante = normalizar(p.speaker);
+        const corpo = normalizar([p.description, p.summary ?? '', p.speakerProfile?.bio ?? ''].join(' '));
+        let score = 0;
+        for (const tk of termosBusca) {
+          if (titulo.includes(tk) || palestrante.includes(tk)) score += 3;
+          else if (corpo.includes(tk)) score += 1;
+        }
+        // Boost semantico: a palestra pertence a uma categoria que a busca acionou.
+        // Peso menor que um acerto literal, para que matches diretos ranqueiem antes.
+        const cats = Array.isArray(p.categoryIds) ? (p.categoryIds as unknown[]).map(String) : [];
+        if (cats.some(c => categoriasAlvo.has(c))) score += 2;
+        return { p, score };
+      })
+      .filter(x => x.score > 0)
+      .sort((a, b) =>
+        b.score - a.score ||
+        Number(b.p.isProcessed) - Number(a.p.isProcessed) ||
+        (b.p.year ?? 0) - (a.p.year ?? 0) ||
+        a.p.title.localeCompare(b.p.title)
+      )
+      .slice(0, 12)
+      .map(x => x.p);
 
     if (resultados.length === 0) {
-      return "NENHUMA palestra encontrada no catálogo para esse termo. NÃO invente dados. Informe ao usuário que não há correspondência.";
+      return "NENHUMA palestra encontrada no banco de dados de producao para esse termo. NAO invente dados. Informe ao usuario que nao ha correspondencia.";
     }
 
     return resultados
-      .map(p => `ID: ${p.id} | Título: "${p.title}" | Palestrante: ${p.speaker} | Categorias: ${JSON.stringify(p.categoryIds)}`)
+      .map(p => {
+        const bio = p.speakerProfile?.bio ? ` | Bio: ${p.speakerProfile.bio.slice(0, 240)}` : '';
+        const summary = p.summary ? ` | Resumo: ${p.summary.slice(0, 240)}` : '';
+        return `ID: ${p.externalId || p.id} | DB_ID: ${p.id} | Titulo: "${p.title}" | Palestrante: ${p.speaker} | Duracao: ${p.duration} | Ano: ${p.year} | Categorias: ${JSON.stringify(p.categoryIds)}${summary}${bio}`;
+      })
       .join('\n');
   },
   {
     name: "buscar_palestras",
-    description: "Busca palestrantes ou palestras no catálogo oficial por nome do preletor ou tema da palestra. SEMPRE use antes de afirmar que uma palestra existe.",
+    description: "Busca palestrantes ou palestras exclusivamente no banco de dados de producao. Ja faz busca por palavra (frases sao quebradas em termos), e insensivel a acentos e entende sinonimos/temas mapeando a intencao para as 7 categorias (ex.: 'transformacional' encontra palestras de Mudanca/Inovacao). Passe a pergunta NATURAL do usuario. SEMPRE use antes de afirmar que uma palestra existe.",
     schema: z.object({
-      termo: z.string().describe("Termo de pesquisa: nome do preletor ou palavra-chave do título"),
+      termo: z.string().describe("A pergunta ou tema do usuario, em linguagem natural (ex.: 'lideranca transformacional', 'como dar feedback')"),
     }),
   }
 );
@@ -57,84 +197,106 @@ const buscar_palestras = tool(
 
 const buscar_por_categoria = tool(
   async ({ categoryId }) => {
-    const resultados = CATALOGO_OFICIAL.filter(p =>
-      p.categoryIds.includes(categoryId)
-    );
-
     const catName = CATEGORIES.find(c => c.id === categoryId)?.name || `Categoria ${categoryId}`;
+    const slug = CATEGORY_SLUGS[categoryId];
+
+    if (!slug) {
+      return `Categoria ${categoryId} invalida. Use IDs de 1 a 7.`;
+    }
+
+    // Palestra.categoryIds guarda slugs (ex.: "lideranca-pessoal"), nao numeros.
+    const resultados = await prisma.palestra.findMany({
+      where: { categoryIds: { array_contains: slug } },
+      take: 30,
+      orderBy: [{ isProcessed: 'desc' }, { year: 'desc' }, { title: 'asc' }],
+    });
 
     if (resultados.length === 0) {
-      return `Nenhuma palestra encontrada para a categoria ${catName} (ID: ${categoryId}).`;
+      return `Nenhuma palestra encontrada no banco de dados de producao para a categoria ${catName} (ID: ${categoryId}).`;
     }
 
     return `Palestras da categoria "${catName}" (${resultados.length} encontradas):\n` +
       resultados
-        .map(p => `ID: ${p.id} | Título: "${p.title}" | Palestrante: ${p.speaker}`)
+        .map(p => `ID: ${p.externalId || p.id} | DB_ID: ${p.id} | Titulo: "${p.title}" | Palestrante: ${p.speaker}`)
         .join('\n');
   },
   {
     name: "buscar_por_categoria",
-    description: "Busca TODAS as palestras de uma categoria específica pelo ID da categoria (1-7). Use para montar trilhas ou devolutivas baseadas em categorias prioritárias.",
+    description: "Busca TODAS as palestras de uma categoria especifica exclusivamente no banco de dados de producao.",
     schema: z.object({
-      categoryId: z.number().min(1).max(7).describe("ID da categoria (1=Liderança Pessoal, 2=Pessoas/Cultura/Confiança, 3=Comunicação/Influência, 4=Estratégia/Decisões/Execução, 5=Mudança/Inovação, 6=Resiliência/Saúde, 7=Propósito/Visão/Legado)"),
+      categoryId: z.number().min(1).max(7).describe("ID da categoria (1-7)"),
     }),
   }
 );
 
-// ═══════════════════════════════════════════
-// TOOL 3: Validar IDs de Palestras
-// ═══════════════════════════════════════════
-
 const validar_ids = tool(
   async ({ ids }) => {
-    const validos = ids.filter(id => PALESTRA_IDS_VALIDOS.includes(id));
-    const invalidos = ids.filter(id => !PALESTRA_IDS_VALIDOS.includes(id));
+    const rows = await prisma.palestra.findMany({
+      where: { OR: [{ id: { in: ids } }, { externalId: { in: ids } }] },
+      select: { id: true, externalId: true },
+    });
+    const validSet = new Set(rows.flatMap(row => [row.id, row.externalId].filter(Boolean) as string[]));
+    const validos = ids.filter(id => validSet.has(id));
+    const invalidos = ids.filter(id => !validSet.has(id));
 
-    let msg = `IDs válidos: [${validos.join(', ')}]`;
+    let msg = `IDs validos no banco de producao: [${validos.join(', ')}]`;
     if (invalidos.length > 0) {
-      msg += `\nIDs INVÁLIDOS (remova estes!): [${invalidos.join(', ')}]`;
+      msg += `\nIDs INVALIDOS no banco de producao (remova estes): [${invalidos.join(', ')}]`;
     }
     return msg;
   },
   {
     name: "validar_ids",
-    description: "Valida se os IDs de palestras existem no catálogo oficial. Use ANTES de incluir IDs na resposta final para garantir que são válidos.",
+    description: "Valida se os IDs de palestras existem no banco de dados de producao.",
     schema: z.object({
-      ids: z.array(z.string()).describe("Lista de IDs de palestras a validar, por exemplo ['lp1', 'pcc2', 'gls23_4']"),
+      ids: z.array(z.string()).describe("Lista de IDs ou externalIds de palestras a validar"),
     }),
   }
 );
-
-// ═══════════════════════════════════════════
-// TOOL 4: Obter Detalhes de uma Palestra
-// ═══════════════════════════════════════════
 
 const detalhe_palestra = tool(
   async ({ palestraId }) => {
-    const palestra = CATALOGO_OFICIAL.find(p => p.id === palestraId);
+    const palestra = await prisma.palestra.findFirst({
+      where: { OR: [{ id: palestraId }, { externalId: palestraId }] },
+      include: { speakerProfile: true },
+    });
     if (!palestra) {
-      return `Palestra com ID "${palestraId}" NÃO EXISTE no catálogo. Use buscar_palestras ou buscar_por_categoria para encontrar IDs válidos.`;
+      return `Palestra com ID "${palestraId}" NAO EXISTE no banco de dados de producao. Use buscar_palestras ou buscar_por_categoria para encontrar IDs validos.`;
     }
-    const cats = palestra.categoryIds.map(cid => CATEGORIES.find(c => c.id === cid)?.name || `Cat ${cid}`);
-    return `ID: ${palestra.id} | Título: "${palestra.title}" | Palestrante: ${palestra.speaker} | Categorias: ${cats.join(', ')}`;
+    const categoryIds = Array.isArray(palestra.categoryIds) ? palestra.categoryIds : [];
+    const cats = categoryIds.map(cid => CATEGORIES.find(c => c.id === cid)?.name || `Cat ${cid}`);
+    return `ID: ${palestra.externalId || palestra.id} | DB_ID: ${palestra.id} | Titulo: "${palestra.title}" | Palestrante: ${palestra.speaker} | Duracao: ${palestra.duration} | Ano: ${palestra.year} | Categorias: ${cats.join(', ')} | Descricao: ${palestra.description}${palestra.summary ? ` | Resumo: ${palestra.summary}` : ''}${palestra.speakerProfile?.bio ? ` | Bio: ${palestra.speakerProfile.bio}` : ''}`;
   },
   {
     name: "detalhe_palestra",
-    description: "Obtém detalhes completos de uma palestra específica pelo ID. Use para enriquecer respostas com informações precisas.",
+    description: "Obtem detalhes completos de uma palestra especifica pelo ID no banco de dados de producao.",
     schema: z.object({
-      palestraId: z.string().describe("ID da palestra, por exemplo 'lp1', 'gls23_4'"),
+      palestraId: z.string().describe("ID ou externalId da palestra"),
     }),
   }
 );
 
+async function filterExistingPalestraIds(ids: string[]): Promise<string[]> {
+  const rows = await prisma.palestra.findMany({
+    where: { OR: [{ id: { in: ids } }, { externalId: { in: ids } }] },
+    select: { id: true, externalId: true },
+  });
+  const validSet = new Set(rows.flatMap(row => [row.id, row.externalId].filter(Boolean) as string[]));
+  return ids.filter(id => validSet.has(id));
+}
 
-// ═══════════════════════════════════════════
-// AGENT 1: Busca Inteligente
-// ═══════════════════════════════════════════
+async function getFallbackPalestraIds(prefix: string): Promise<string[]> {
+  const rows = await prisma.palestra.findMany({
+    where: { externalId: { startsWith: prefix } },
+    select: { externalId: true },
+    take: 3,
+    orderBy: { externalId: 'asc' },
+  });
+  return rows.map(row => row.externalId);
+}
 
 export async function agentSearch(query: string, organizationType: string): Promise<string> {
   const orgContext = getOrgContext(organizationType);
-  const palestrantes = PALESTRANTES_VALIDOS.join(', ');
 
   const agent = createReactAgent({
     llm: createLLM(0.1),
@@ -146,7 +308,7 @@ ${orgContext}
 Você tem acesso EXCLUSIVO às palestras e preletores retornados OBRIGATORIAMENTE pela ferramenta "buscar_palestras".
 REGRA ABSOLUTA 1: Você DEVE usar a ferramenta "buscar_palestras" para encontrar informações antes de responder.
 REGRA ABSOLUTA 2: Você JAMAIS deve inventar uma palestra se a ferramenta não retornou correspondência.
-REGRA ABSOLUTA 3: Se não há dados, devolva um insight avisando que não temos, listando preletores disponíveis: ${palestrantes}.
+REGRA ABSOLUTA 3: Se nao ha dados retornados pela ferramenta, devolva um insight avisando que nao temos correspondencia no banco de dados de producao.
 
 Seu retorno final DEVE ser SEMPRE um JSON válido (SÓ O JSON):
 {
@@ -167,7 +329,7 @@ Se a ferramenta não encontrou, coloque results com 1 insight de aviso. NUNCA DE
   });
 
   const lastMessageContent = result.messages[result.messages.length - 1].content as string;
-  return lastMessageContent.replace(/```json/g, '').replace(/```/g, '').trim();
+  return extrairJson(lastMessageContent);
 }
 
 
@@ -234,16 +396,15 @@ Trilha 2: APROFUNDAMENTO (reflexão, 3-4 palestras).`;
       ]
     });
 
-    const raw = (result.messages[result.messages.length - 1].content as string)
-      .replace(/```json/g, '').replace(/```/g, '').trim();
+    const raw = extrairJson(result.messages[result.messages.length - 1].content as string);
     const parsed = JSON.parse(raw);
 
     // Post-validation: filter only valid IDs as safety net
     if (parsed.trilha1?.palestraIds) {
-      parsed.trilha1.palestraIds = parsed.trilha1.palestraIds.filter((id: string) => PALESTRA_IDS_VALIDOS.includes(id));
+      parsed.trilha1.palestraIds = await filterExistingPalestraIds(parsed.trilha1.palestraIds);
     }
     if (parsed.trilha2?.palestraIds) {
-      parsed.trilha2.palestraIds = parsed.trilha2.palestraIds.filter((id: string) => PALESTRA_IDS_VALIDOS.includes(id));
+      parsed.trilha2.palestraIds = await filterExistingPalestraIds(parsed.trilha2.palestraIds);
     }
 
     return parsed;
@@ -253,8 +414,8 @@ Trilha 2: APROFUNDAMENTO (reflexão, 3-4 palestras).`;
     const catPrefixes: Record<number, string> = { 1: 'lp', 2: 'pcc', 3: 'ci', 4: 'ede', 5: 'mir', 6: 'rse', 7: 'pvl' };
     const prefix1 = catPrefixes[priority1CategoryId] || 'lp';
     const prefix2 = priority2CategoryId ? catPrefixes[priority2CategoryId] || prefix1 : prefix1;
-    const fb1 = [`${prefix1}1`, `${prefix1}2`, `${prefix1}3`].filter(id => PALESTRA_IDS_VALIDOS.includes(id));
-    const fb2 = [`${prefix2}1`, `${prefix2}2`, `${prefix2}3`].filter(id => PALESTRA_IDS_VALIDOS.includes(id));
+    const fb1 = await getFallbackPalestraIds(prefix1);
+    const fb2 = await getFallbackPalestraIds(prefix2);
     return {
       trilha1: { name: `Impacto Rápido - ${cat1?.name || 'Liderança'}`, description: 'Mudanças visíveis em 2-3 semanas.', type: 'IMPACTO', palestraIds: fb1, reasoning: 'Trilha de fallback.' },
       trilha2: { name: `Aprofundamento - ${cat2?.name || cat1?.name || 'Liderança'}`, description: 'Consolidar aprendizados.', type: 'APROFUNDAMENTO', palestraIds: fb2, reasoning: 'Trilha de fallback.' },
@@ -327,6 +488,7 @@ Busque as palestras das categorias prioritárias usando as ferramentas antes de 
     ]
   });
 
+  // Devolutiva e texto/markdown (nao JSON puro): apenas remove as cercas.
   const content = result.messages[result.messages.length - 1].content as string;
   return content.replace(/```json/g, '').replace(/```/g, '').trim();
 }
@@ -394,5 +556,5 @@ Primeiro, confirme que a palestra e o palestrante existem no catálogo usando bu
   });
 
   const content = result.messages[result.messages.length - 1].content as string;
-  return content.replace(/```json/g, '').replace(/```/g, '').trim();
+  return extrairJson(content);
 }
