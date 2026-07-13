@@ -2,55 +2,10 @@ import { env } from '../config/env';
 import { CATEGORIES, CategoryScore, getStrengthLevel } from '../lib/scoring';
 import prisma from '../lib/prisma';
 
-// Catálogo oficial — ÚNICA fonte de verdade para palestras e palestrantes
-// Inclui TODAS as palestras cadastradas: temáticas (lp/pcc/ci/ede/mir/rse/pvl),
-// base (p1-p21) e edições GLS 2017-2023 (gls17-gls23)
+// Catálogo oficial — ÚNICA fonte de verdade para palestras e palestrantes.
+// Somente as 112 palestras que constam nos documentos oficiais das temporadas
+// GLS 2017-18 a 2025-26 (gerado de frontend/src/data/capacite-data.ts).
 export const CATALOGO_OFICIAL = [
-  // ═══ Temáticas (21) ═══
-  { id: 'lp1', title: 'O Líder que se Conhece', speaker: 'Craig Groeschel', categoryIds: [1] },
-  { id: 'lp2', title: 'Coragem para Liderar', speaker: 'Brené Brown', categoryIds: [1] },
-  { id: 'lp3', title: 'Disciplina do Líder', speaker: 'Jocko Willink', categoryIds: [1] },
-  { id: 'pcc1', title: 'Confiança é Construída', speaker: 'Brené Brown', categoryIds: [2] },
-  { id: 'pcc2', title: 'Cultura Vence Estratégia', speaker: 'Sam Chand', categoryIds: [2] },
-  { id: 'pcc3', title: 'O Poder da Vulnerabilidade', speaker: 'Patrick Lencioni', categoryIds: [2] },
-  { id: 'ci1', title: 'A Arte de Comunicar', speaker: 'Andy Stanley', categoryIds: [3] },
-  { id: 'ci2', title: 'Influência Autêntica', speaker: 'John Maxwell', categoryIds: [3] },
-  { id: 'ci3', title: 'Conversas Corajosas', speaker: 'Susan Scott', categoryIds: [3] },
-  { id: 'ede1', title: 'Foco Estratégico', speaker: 'Jim Collins', categoryIds: [4] },
-  { id: 'ede2', title: 'Execução com Excelência', speaker: 'Chris McChesney', categoryIds: [4] },
-  { id: 'ede3', title: 'Decisões que Transformam', speaker: 'Liz Wiseman', categoryIds: [4] },
-  { id: 'mir1', title: 'Liderando Mudanças', speaker: 'John Kotter', categoryIds: [5] },
-  { id: 'mir2', title: 'Mentalidade de Crescimento', speaker: 'Carol Dweck', categoryIds: [5] },
-  { id: 'mir3', title: 'Inovação com Propósito', speaker: 'Beth Comstock', categoryIds: [5] },
-  { id: 'rse1', title: 'Liderança Sustentável', speaker: 'Henry Cloud', categoryIds: [6] },
-  { id: 'rse2', title: 'Saúde do Líder', speaker: 'Bill Hybels', categoryIds: [6] },
-  { id: 'rse3', title: 'Resiliência em Tempos Difíceis', speaker: 'Sheryl Sandberg', categoryIds: [6] },
-  { id: 'pvl1', title: 'Liderança com Propósito', speaker: 'Simon Sinek', categoryIds: [7] },
-  { id: 'pvl2', title: 'Visão que Inspira', speaker: 'Andy Stanley', categoryIds: [7] },
-  { id: 'pvl3', title: 'Legado que Transforma', speaker: 'Bob Goff', categoryIds: [7] },
-  // ═══ Base p1-p21 ═══
-  { id: 'p1', title: 'O Líder que se Conhece', speaker: 'Craig Groeschel', categoryIds: [1] },
-  { id: 'p2', title: 'Liderança Sob Pressão', speaker: 'Patrick Lencioni', categoryIds: [1] },
-  { id: 'p3', title: 'Prioridades que Não Mudam', speaker: 'Henry Cloud', categoryIds: [1] },
-  { id: 'p4', title: 'Confiança é Construída', speaker: 'Brené Brown', categoryIds: [2] },
-  { id: 'p5', title: 'Segurança Psicológica', speaker: 'Amy Edmondson', categoryIds: [2] },
-  { id: 'p6', title: 'Cultura como Vantagem', speaker: 'Horst Schulze', categoryIds: [2] },
-  { id: 'p7', title: 'A Arte de Comunicar', speaker: 'Andy Stanley', categoryIds: [3] },
-  { id: 'p8', title: 'Conversas Difíceis', speaker: 'Sheila Heen', categoryIds: [3] },
-  { id: 'p9', title: 'Reuniões que Decidem', speaker: 'Patrick Lencioni', categoryIds: [3] },
-  { id: 'p10', title: 'Foco Estratégico', speaker: 'Jim Collins', categoryIds: [4] },
-  { id: 'p11', title: 'Execução com Cadência', speaker: 'Chris McChesney', categoryIds: [4] },
-  { id: 'p12', title: 'Papéis Claros, Times Fortes', speaker: 'Marcus Buckingham', categoryIds: [4] },
-  { id: 'p13', title: 'Lidere a Mudança', speaker: 'John Maxwell', categoryIds: [5] },
-  { id: 'p14', title: 'Inovar com Propósito', speaker: 'Beth Comstock', categoryIds: [5] },
-  { id: 'p15', title: 'Aprendendo com Erros', speaker: 'Tim Elmore', categoryIds: [5] },
-  { id: 'p16', title: 'Ritmo Sustentável', speaker: 'Craig Groeschel', categoryIds: [6] },
-  { id: 'p17', title: 'Limites Saudáveis', speaker: 'Henry Cloud', categoryIds: [6] },
-  { id: 'p18', title: 'Equipes que se Apoiam', speaker: 'Liz Wiseman', categoryIds: [6] },
-  { id: 'p19', title: 'Propósito que Move', speaker: 'Simon Sinek', categoryIds: [7] },
-  { id: 'p20', title: 'Visão Compartilhada', speaker: 'Bill Hybels', categoryIds: [7] },
-  { id: 'p21', title: 'Valores Sob Pressão', speaker: 'Albert Tate', categoryIds: [7] },
-  // ═══ GLS 2017-2018 ═══
   { id: 'gls17_1', title: 'O poder da paixão e da perseverança', speaker: 'Angela Duckworth', categoryIds: [6, 1] },
   { id: 'gls17_2', title: 'Liderança agora, responsabilidade social sempre!', speaker: 'Bryan Stevenson', categoryIds: [1, 7] },
   { id: 'gls17_3', title: 'Liderança criativa em um mundo de grandes transformações', speaker: 'Fredrik Haren', categoryIds: [5, 1] },
@@ -59,7 +14,6 @@ export const CATALOGO_OFICIAL = [
   { id: 'gls17_6', title: 'O "tempo ocioso" para a construção de soluções', speaker: 'Juliet Funt', categoryIds: [4, 6] },
   { id: 'gls17_7', title: 'Reinventando a gestão da performance', speaker: 'Marcus Buckingham', categoryIds: [4, 2] },
   { id: 'gls17_8', title: 'Liderando você mesmo', speaker: 'Sam Adayemi', categoryIds: [1, 7] },
-  // ═══ GLS 2018-2019 ═══
   { id: 'gls18_1', title: 'O líder que as pessoas amam seguir', speaker: 'Craig Groeschel', categoryIds: [1, 2] },
   { id: 'gls18_2', title: 'Liderança preventiva', speaker: 'Craig Groeschel', categoryIds: [4, 1] },
   { id: 'gls18_3', title: 'Lições de liderança', speaker: 'Angela Ahrendts', categoryIds: [1, 7] },
@@ -73,8 +27,6 @@ export const CATALOGO_OFICIAL = [
   { id: 'gls18_11', title: 'Navegando em conversas difíceis', speaker: 'Sheila Heen', categoryIds: [3, 2] },
   { id: 'gls18_12', title: 'Filantropia e Inovação', speaker: 'Strive Masiyiwa', categoryIds: [7, 5] },
   { id: 'gls18_13', title: 'Planar!', speaker: 'TD Jakes', categoryIds: [1, 7] },
-  { id: 'gls18_14', title: 'Comece pelo porquê', speaker: 'Simon Sinek', categoryIds: [7, 3] },
-  // ═══ GLS 2019-2020 ═══
   { id: 'gls19_1', title: 'Um-a-um com Paula Faris', speaker: 'Chris Voss', categoryIds: [3, 1] },
   { id: 'gls19_2', title: 'Coração acima da Razão', speaker: 'Craig Groeschel', categoryIds: [1, 7] },
   { id: 'gls19_3', title: 'Endireite a Curva', speaker: 'Craig Groeschel', categoryIds: [4, 1] },
@@ -86,7 +38,6 @@ export const CATALOGO_OFICIAL = [
   { id: 'gls19_9', title: 'Liderança VIP', speaker: 'Krish Kandiah', categoryIds: [2, 7] },
   { id: 'gls19_10', title: 'Coragem de Principiante', speaker: 'Liz Bohannon', categoryIds: [5, 1] },
   { id: 'gls19_11', title: 'Domesticando Tigres', speaker: 'Todd Henry', categoryIds: [4, 6] },
-  // ═══ GLS 2020-2021 ═══
   { id: 'gls20_1', title: 'Liderança que atende ao momento', speaker: 'Albert Tate', categoryIds: [1, 7] },
   { id: 'gls20_2', title: 'Segurança psicológica', speaker: 'Amy Edmondson', categoryIds: [2, 3] },
   { id: 'gls20_3', title: 'Lidere durante o mergulho', speaker: 'Craig Groeschel', categoryIds: [1, 6] },
@@ -98,7 +49,6 @@ export const CATALOGO_OFICIAL = [
   { id: 'gls20_9', title: 'Os 6 traços da liderança', speaker: 'Tomas Chamorro-Premuzic', categoryIds: [3, 2] },
   { id: 'gls20_10', title: 'A ciência da liderança: impactando para o bem', speaker: 'Vanessa Van Edwards', categoryIds: [3, 2] },
   { id: 'gls20_11', title: 'Liderança amorosa – entrevista com Kaká', speaker: 'Kaká', categoryIds: [7, 2] },
-  // ═══ GLS 2021-2022 ═══
   { id: 'gls21_1', title: 'Expandindo sua capacidade de liderança', speaker: 'Craig Groeschel', categoryIds: [1, 4] },
   { id: 'gls21_2', title: 'Talento rebelde', speaker: 'Francesca Gino', categoryIds: [5, 2] },
   { id: 'gls21_3', title: 'Um minuto para pensar', speaker: 'Juliet Funt', categoryIds: [4, 6] },
@@ -113,7 +63,6 @@ export const CATALOGO_OFICIAL = [
   { id: 'gls21_12', title: 'Liderança e saúde mental', speaker: 'Henry Cloud', categoryIds: [6, 2] },
   { id: 'gls21_13', title: 'Dominando o risco', speaker: 'Stanley McChrystal', categoryIds: [4, 5] },
   { id: 'gls21_14', title: 'Colaboração, Criatividade e Convicção', speaker: 'Jerry Lorenzo', categoryIds: [5, 2] },
-  // ═══ GLS 2022-2023 ═══
   { id: 'gls22_1', title: 'A viagem de uma vida', speaker: 'Bob Iger', categoryIds: [7, 1] },
   { id: 'gls22_2', title: 'Aprenda a liderar em uma nova realidade', speaker: 'Carey Nieuwhof', categoryIds: [5, 1] },
   { id: 'gls22_3', title: 'Liderança única', speaker: 'Craig Groeschel', categoryIds: [1, 4] },
@@ -125,7 +74,6 @@ export const CATALOGO_OFICIAL = [
   { id: 'gls22_9', title: 'Desbloqueando a mentalidade de start-up em sua organização', speaker: 'Sahar Hashemi', categoryIds: [5, 4] },
   { id: 'gls22_10', title: 'Adaptando sua liderança para os desafios de hoje', speaker: 'Stephanie Chung', categoryIds: [1, 5] },
   { id: 'gls22_11', title: 'Ciência da conexão', speaker: 'Vanessa Van Edwards', categoryIds: [3, 2] },
-  // ═══ GLS 2023-2024 ═══
   { id: 'gls23_1', title: 'Lidere onde estiver', speaker: 'Albert Tate', categoryIds: [1, 7] },
   { id: 'gls23_2', title: 'Liderando em tempos difíceis', speaker: 'Albert Tate', categoryIds: [1, 6] },
   { id: 'gls23_3', title: 'Um sacrifício que vale a pena', speaker: 'Chris Mathebula', categoryIds: [7, 1] },
@@ -140,7 +88,6 @@ export const CATALOGO_OFICIAL = [
   { id: 'gls23_12', title: 'Construa seu MAP de carreira', speaker: 'Pat Gelsinger', categoryIds: [4, 7] },
   { id: 'gls23_13', title: 'Coragem nos tempos atuais', speaker: 'Patrick Lencioni', categoryIds: [1, 3] },
   { id: 'gls23_14', title: 'Aumentando o nível – 3 perguntas para líderes de outro nível', speaker: 'Ryan Leak', categoryIds: [4, 1] },
-  // ═══ GLS 2024-2025 ═══
   { id: 'gls24_2', title: 'Mais feliz em um mundo infeliz', speaker: 'Arthur C. Brooks', categoryIds: [6, 1] },
   { id: 'gls24_3', title: 'Alcance de controle', speaker: 'Carey Lohrenz', categoryIds: [1, 4] },
   { id: 'gls24_4', title: 'Permissão para se obcecar', speaker: 'Craig Groeschel', categoryIds: [1, 4] },
@@ -156,7 +103,6 @@ export const CATALOGO_OFICIAL = [
   { id: 'gls24_14', title: 'Vitória por meio do trabalho em equipe', speaker: 'Mike Krzyzewski', categoryIds: [2, 4] },
   { id: 'gls24_15', title: 'Impulso dinâmico', speaker: 'Molly Fletcher', categoryIds: [4, 5] },
   { id: 'gls24_16', title: 'Hospitalidade irracional', speaker: 'Will Guidara', categoryIds: [2, 7] },
-  // ═══ GLS 2025-2026 ═══
   { id: 'gls25_1', title: 'A monotonia é o segredo do sucesso', speaker: 'Craig Groeschel', categoryIds: [1, 4] },
   { id: 'gls25_2', title: 'O excesso na liderança', speaker: 'Juliet Funt', categoryIds: [6, 4] },
   { id: 'gls25_3', title: 'Conexão humana na era digital', speaker: 'Erica Dhawan', categoryIds: [3, 2] },
