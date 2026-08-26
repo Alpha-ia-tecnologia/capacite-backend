@@ -72,26 +72,10 @@ export async function login(data: LoginData) {
     throw new Error('E-mail ou senha inválidos');
   }
 
-  // Update streak
   const now = new Date();
-  const lastActive = user.lastActiveDate;
-  let streakDays = user.streakDays;
-
-  if (lastActive) {
-    const diffDays = Math.floor((now.getTime() - lastActive.getTime()) / (1000 * 60 * 60 * 24));
-    if (diffDays === 1) {
-      streakDays += 1;
-    } else if (diffDays > 1) {
-      streakDays = 1;
-    }
-    // diffDays === 0 means same day, keep streak
-  } else {
-    streakDays = 1;
-  }
-
   await prisma.user.update({
     where: { id: user.id },
-    data: { lastActiveDate: now, streakDays },
+    data: { lastActiveDate: now },
   });
 
   const token = generateToken(user.id, user.email);
@@ -99,7 +83,7 @@ export async function login(data: LoginData) {
   const { passwordHash: _, ...userWithoutPassword } = user;
 
   return {
-    user: { ...userWithoutPassword, streakDays },
+    user: userWithoutPassword,
     token,
   };
 }
@@ -118,12 +102,8 @@ export async function getProfile(userId: string) {
       location: true,
       avatarUrl: true,
       isAdmin: true,
-      streakDays: true,
       lastActiveDate: true,
       createdAt: true,
-      goldStars: {
-        select: { type: true, earnedAt: true },
-      },
       _count: {
         select: {
           diagnosticos: true,
@@ -158,7 +138,6 @@ export async function updateProfile(
       location: true,
       avatarUrl: true,
       isAdmin: true,
-      streakDays: true,
       createdAt: true,
     },
   });

@@ -1,7 +1,6 @@
 import prisma from '../lib/prisma';
 import { calculateDiagnostico } from '../lib/scoring';
 import { generateDevolutiva, generateTrilhaSuggestions } from './deepseek.service';
-import { checkAndAwardStars } from './gamificacao.service';
 
 interface CreateDiagnosticoData {
   userId: string;
@@ -49,9 +48,6 @@ export async function createDiagnostico(data: CreateDiagnosticoData) {
       suggestedTrilhas,
     },
   });
-
-  // Award gold star for completing diagnostic
-  await checkAndAwardStars(userId);
 
   return {
     ...diagnostico,

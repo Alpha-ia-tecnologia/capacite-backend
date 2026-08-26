@@ -1,5 +1,4 @@
 import prisma from '../lib/prisma';
-import { checkAndAwardStars } from './gamificacao.service';
 
 interface CreateTrilhaData {
   userId: string;
@@ -152,9 +151,6 @@ export async function markPalestraWatched(
       watchedAt: watched ? new Date() : null,
     },
   });
-
-  // Check for gamification milestones
-  await checkAndAwardStars(userId);
 
   return progress;
 }

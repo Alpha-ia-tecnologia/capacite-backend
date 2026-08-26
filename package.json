@@ -11,12 +11,14 @@
     "db:migrate": "npx prisma migrate dev",
     "db:push": "npx prisma db push",
     "db:seed": "npx tsx prisma/seed.ts",
-    "db:studio": "npx prisma studio"
+    "db:studio": "npx prisma studio",
+    "review": "npx tsx tools/code-review/run.ts"
   },
   "dependencies": {
     "@langchain/core": "^1.1.39",
     "@langchain/langgraph": "^1.2.8",
     "@langchain/openai": "^1.4.4",
+    "@octokit/rest": "^21.1.1",
     "@prisma/client": "^6.4.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",

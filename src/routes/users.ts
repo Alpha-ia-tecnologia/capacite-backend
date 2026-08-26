@@ -83,11 +83,10 @@ router.get('/', async (req: AuthRequest, res: Response) => {
           organizationType: true,
           role: true,
           isAdmin: true,
-          streakDays: true,
           lastActiveDate: true,
           createdAt: true,
           _count: {
-            select: { diagnosticos: true, trilhas: true, goldStars: true },
+            select: { diagnosticos: true, trilhas: true },
           },
         },
         orderBy: { [sort as string]: order },
@@ -126,7 +125,6 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
         role: true,
         location: true,
         isAdmin: true,
-        streakDays: true,
         lastActiveDate: true,
         createdAt: true,
         diagnosticos: {
@@ -146,7 +144,6 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
             createdAt: true,
           },
         },
-        goldStars: true,
       },
     });
 
